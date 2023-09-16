@@ -1,4 +1,4 @@
-const { ipcRenderer, screen } = require('electron')
+const { ipcRenderer, desktopCapturer } = require('electron')
 
 console.log('ipcRenderer loaded');
 
@@ -10,20 +10,12 @@ console.log('ipcRenderer loaded');
 const RTCConfig = {
 	iceServers: [{
 		'urls': 'stun:stun.l.google.com:19302',
-		username: 'webrtc',
-		credential: 'turnserver'
+		// username: 'webrtc',
+		// credential: 'turnserver'
 	}]
 };
-// const RTCConfig = {
-// 	iceServers: [{
-// 			urls: "http://localhost:3000",  // A TURN server using socket.io
-// 			// username: "webrtc",
-// 			// credential: "turnserver"
-// 		}
-// 	]
-// };
-let PeerConnection;
 
+let PeerConnection;
 
 /** @note create request */
 ipcRenderer.on('REQUEST_SCREENCAST', RequestScreencast);
@@ -31,6 +23,7 @@ ipcRenderer.on('REQUEST_SCREENCAST', RequestScreencast);
 async function RequestScreencast() {
 	console.log('method::REQUEST_SCREENCAST, ipcRenderer');
 	createPeerConnection();
+
 	const offer = await PeerConnection.createOffer();
 	if (PeerConnection.signalingState != "stable") {
 		return;
@@ -43,55 +36,88 @@ async function RequestScreencast() {
 
 ipcRenderer.on('REQUEST_RECEIVED', AcceptRTCRequest);
 
-async function AcceptRTCRequest(event, message) {
+async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
 	console.log('method::REQUEST_RECEIVED, ipcRenderer');
-	createPeerConnection();
-	await PeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(message.sdp)));
+	if(!PeerConnection) {
+		createPeerConnection();
+	}
+
+
+	if (PeerConnection.signalingState != "stable") {
+	
+		// Set the local and remove descriptions for rollback; don't proceed
+		// until both return.
+		await Promise.all([
+			PeerConnection.setLocalDescription({type: "rollback"}),
+			PeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(message.sdp)))
+		]);
+		return;
+	  } else {
+		await PeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(message.sdp)));
+	}
+
+	const streams = await navigator.mediaDevices.getUserMedia({
+		audio: false,
+		video: {
+		mandatory: {
+			chromeMediaSource: 'desktop',
+			chromeMediaSourceId: sourceId,
+			minWidth: ScreenSize.width,
+			maxWidth: ScreenSize.width,
+			minHeight: ScreenSize.height,
+			maxHeight: ScreenSize.height,
+		}
+		}
+	});
+
+	streams.getTracks().forEach(async (track) => {
+		await PeerConnection.addTrack(track, streams);
+	});
+	handleLocalStream(streams[0]);
+
 	const answer = await PeerConnection.createAnswer();
-	console.log('answer', answer);
 	await PeerConnection.setLocalDescription(answer);
 	/** @note send data using sockets */
 	ipcRenderer.send('ACCEPT_INVITE', { sdp: JSON.stringify(answer) });
 }
 
 
-ipcRenderer.on('RECORD_SCREEN', ShareScreen);
+ipcRenderer.on('SHARE_SCREEN', ShareScreen);
 
-async function ShareScreen(event, sourceId, ScreenSize) {
-	console.log('method::RECORD_SCREEN, ipcRenderer');
-    /** @fixme remove creating peer connection and call the global method createPeerConnection() instead. */
-	/** @fixme remove RTCSignaling and replace with socket call for receiving peer call offer. */
-    // RTCSignalingChannel.addEventListener('message', async message => {
-		// if (message.offer) {
-			// PeerConnection.setRemoteDescription(new RTCSessionDescription(message.offer));
-			// const answer = await PeerConnection.createAnswer();
-            // console.log('answer', answer);
-			// await PeerConnection.setLocalDescription(answer);
-			// /** @note send data using sockets */
-            // ipcRenderer.send('accept-invite', { answer });
-            try {
-				const stream = await navigator.mediaDevices.getUserMedia({
-				  audio: false,
-				  video: {
-					mandatory: {
-					  chromeMediaSource: 'desktop',
-					  /** @fixme sourceId required */
-					  chromeMediaSourceId: sourceId,
-					  minWidth: ScreenSize.width,
-					  maxWidth: ScreenSize.width,
-					  minHeight: ScreenSize.height,
-					  maxHeight: ScreenSize.height,
-					}
-				  }
-				});
-				stream.getTracks().forEach(async (track) => {
-					await PeerConnection.addTrack(track, stream);
-				});
-			  } catch (e) {
-				console.log('error in screencast', e);
-			  }
-		// }
-	// });
+// async function ShareScreen(event, sourceId, ScreenSize, peerAnswer) {
+	async function ShareScreen(event, peerAnswer) {
+	console.log('method::SHARE_SCREEN, ipcRenderer');
+	try {
+		if (PeerConnection.signalingState != 'stable') {
+			const answer = new RTCSessionDescription(JSON.parse(peerAnswer.sdp));
+			await PeerConnection.setRemoteDescription(answer);
+		}
+		// const streams = await navigator.mediaDevices.getUserMedia({
+		// 	audio: false,
+		// 	video: {
+		// 	mandatory: {
+		// 		chromeMediaSource: 'desktop',
+		// 		chromeMediaSourceId: sourceId,
+		// 		minWidth: ScreenSize.width,
+		// 		maxWidth: ScreenSize.width,
+		// 		minHeight: ScreenSize.height,
+		// 		maxHeight: ScreenSize.height,
+		// 	}
+		// 	}
+		// });
+		
+		// // const streams = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+
+		// streams.getTracks().forEach(async (track) => {
+		// 	await PeerConnection.addTrack(track, streams);
+		// });
+
+		// console.log('local streams', streams);
+		// let inboundStream = new MediaStream(streams[0]);
+		// handleLocalStream(inboundStream);
+	} catch (e) {
+		console.error('error in screencast', e);
+	}
 }
 
 
@@ -108,15 +134,23 @@ function createPeerConnection() {
     PeerConnection.onicegatheringstatechange = handleICEGatheringStateChangeEvent;
     PeerConnection.onsignalingstatechange = handleSignalingStateChangeEvent;
     PeerConnection.ontrack = handleTrackEvent;
-    PeerConnection.onnegotiationneeded = RequestScreencast;
+    PeerConnection.onnegotiationneeded = handleNegotiationNeededEvent;
 }
 
 function handleTrackEvent(event) {
-	console.log("*** Track event");
-	// document.getElementById("received_video").srcObject = event.streams[0];
-	// document.getElementById("hangup-button").disabled = false;
-
-
+	console.log("Track event");
+	console.log('event tracks', event.track);
+	console.log('local stream', event.streams);
+	if (event.streams && event.streams[0]) {
+		console.log('local streams');
+		handleLocalStream(event.streams[0]);
+	} 
+	if(event.track) {
+		console.log('remote streams');
+		const inboundStream = new MediaStream();
+		inboundStream.addTrack(event.track);
+		handleRemoteStream(inboundStream);
+	}
 }
 
 function handleICEGatheringStateChangeEvent(event) {
@@ -158,15 +192,72 @@ function handleSignalingStateChangeEvent(event) {
 // Handles |icecandidate| events by forwarding the specified
 // ICE candidate (created by our local ICE agent) to the other
 // peer through the signaling server.
-
 function handleICECandidateEvent(event) {
 	if (event.candidate) {
-	  console.log("*** Outgoing ICE candidate: " + event.candidate.candidate);
-  
-	//   sendToServer({
-	// 	type: "new-ice-candidate",
-	// 	target: targetUsername,
-	// 	candidate: event.candidate
-	//   });
+		console.log("*** Outgoing ICE candidate: " + event.candidate.candidate);
+		ipcRenderer.send('ICE_CANDIDATE', {candidate: JSON.stringify(event.candidate)});
 	}
 }
+
+ipcRenderer.on('NEW_ICE_CANDIDATE', handleNewICECandidateMsg);
+async function handleNewICECandidateMsg(event, request) {
+	console.log('candidate', request.candidate);
+	const candidate = new RTCIceCandidate(JSON.parse(request.candidate));
+
+	console.log("*** Adding received ICE candidate: " + JSON.stringify(candidate));
+	try {
+	await PeerConnection.addIceCandidate(candidate);
+	} catch(err) {
+	console.error('error adding ice candidate', err);
+	}
+}
+
+
+/** @note handle video streams */
+function handleLocalStream (stream) {
+	const localVideo = document.getElementById('localVideo'); 
+	localVideo.srcObject = stream;
+	localVideo.onloadedmetadata = (e) => localVideo.play();
+	// localVideo.play();
+}
+
+function handleRemoteStream(stream) {
+	const remoteVideo = document.getElementById('remoteVideo'); 
+	// inboundStream = new MediaStream();
+	remoteVideo.srcObject = stream;
+	remoteVideo.onloadedmetadata = (e) => remoteVideo.play();
+	// remoteVideo.play();
+}
+
+
+
+async function handleNegotiationNeededEvent() {
+	console.log("Negotiation needed");
+  
+	try {
+	  const offer = await PeerConnection.createOffer();
+  
+	  // If the connection hasn't yet achieved the "stable" state,
+	  // return to the caller. Another negotiationneeded event
+	  // will be fired when the state stabilizes.
+  
+	  if (PeerConnection.signalingState != "stable") {
+		console.log("The connection isn't stable yet; postponing...")
+		return;
+	  }
+  
+	  // Establish the offer as the local peer's current
+	  // description.
+  
+	  console.log("Setting local description to the offer");
+	  await PeerConnection.setLocalDescription(offer);
+  
+	  // Send the offer to the remote peer.
+  
+	  console.log("Sending the offer to the remote peer");
+	  ipcRenderer.send('NEGOTIATION', { sdp: JSON.stringify(PeerConnection.localDescription) });
+
+	} catch(err) {
+	  console.error("The following error occurred while handling the negotiationneeded event:", err);
+	};
+  }

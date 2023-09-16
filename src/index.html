@@ -2,13 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Ng16Example</title>
+  <title>webrtc-electron-ng</title>
   <base href="./">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
 </head>
 <body>
   <app-root></app-root>
+  <div>
+    <p>Remote Video</p>
+    <video id="remoteVideo" width="500" height="350" autoplay muted></video>
+  </div>
+  <div>
+    <p>Local Video</p>
+    <video id="localVideo" width="500" height="350" autoplay muted></video>
+  </div>
   <script src="../ipcRenderer-1.js" type="javascript"></script>
 </body>
 </html>
