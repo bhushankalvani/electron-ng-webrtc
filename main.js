@@ -28,7 +28,7 @@ const socket = io(
 
 /** @fixme UUID v4 implementation pending for conditionals below */
 // const id = uuidv4(); 
-const id = 1; /** @note Static user id to request and respond to screencast requests */
+const id = 2; /** @note Static user id to request and respond to screencast requests */
 console.log('device UUID v4', id);
 
 
@@ -84,7 +84,13 @@ function SocketConnect() {
 		/** @note requesting a screencast for default user with userId 1. */
 		if (id === 2) {
 			console.log(`user id ${id} requesting screencast for 1`);
-			AppWindow.webContents.send('REQUEST_SCREENCAST');
+			const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
+			for (const source of sources) {
+				if (source.name === 'Entire screen') {
+					AppWindow.webContents.send('REQUEST_SCREENCAST', source.id, ScreenSize);
+					return;
+				}
+			}
 		}
 	});
 
@@ -97,13 +103,13 @@ function SocketConnect() {
 async function ScreencastRequest(peerReq) {
 	console.log('screencast request received', peerReq, id);
 	const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
-	// for (const source of sources) {
-	// 	if (source.name === 'Entire screen') {
-	// 		AppWindow.webContents.send('REQUEST_RECEIVED', peerReq, source.id, ScreenSize);
-	// 		return;
-	// 	}
-	// }
-	AppWindow.webContents.send('REQUEST_RECEIVED', peerReq);
+	for (const source of sources) {
+		if (source.name === 'Entire screen') {
+			AppWindow.webContents.send('REQUEST_RECEIVED', peerReq, source.id, ScreenSize);
+			return;
+		}
+	}
+	// AppWindow.webContents.send('REQUEST_RECEIVED', peerReq);
 }
 
 async function ScreencastReqAccepted(peerAnswer) {

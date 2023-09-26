@@ -20,7 +20,7 @@ let PeerConnection;
 /** @note create request */
 ipcRenderer.on('REQUEST_SCREENCAST', RequestScreencast);
 
-async function RequestScreencast() {
+async function RequestScreencast(event, sourceId, ScreenSize) {
 	console.log('method::REQUEST_SCREENCAST, ipcRenderer');
 	createPeerConnection();
 
@@ -31,13 +31,36 @@ async function RequestScreencast() {
 
 	await PeerConnection.setLocalDescription(offer);
 
+	// try {
+	// 	const streams = await navigator.mediaDevices.getUserMedia({
+	// 		audio: false,
+	// 		video: {
+	// 		mandatory: {
+	// 			chromeMediaSource: 'desktop',
+	// 			chromeMediaSourceId: sourceId,
+	// 			minWidth: ScreenSize.width,
+	// 			maxWidth: ScreenSize.width,
+	// 			minHeight: ScreenSize.height,
+	// 			maxHeight: ScreenSize.height,
+	// 		}
+	// 		}
+	// 	});
+	
+	// 	streams.getTracks().forEach(async (track) => {
+	// 		await PeerConnection.addTrack(track, streams);
+	// 	});
+	// 	console.log('handle local streams', streams);
+	// } catch (overConstErr) {
+	// 	console.log('overConstErr', overConstErr, overConstErr.constraint);
+	// }
+
 	ipcRenderer.send('NEW_SCREENCAST_REQ', { sdp: JSON.stringify(PeerConnection.localDescription) });
 }
 
 ipcRenderer.on('REQUEST_RECEIVED', AcceptRTCRequest);
 
-// async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
-	async function AcceptRTCRequest(event, message) {
+async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
+	// async function AcceptRTCRequest(event, message) {
 	console.log('method::REQUEST_RECEIVED, ipcRenderer');
 	if(!PeerConnection) {
 		createPeerConnection();
@@ -60,7 +83,6 @@ ipcRenderer.on('REQUEST_RECEIVED', AcceptRTCRequest);
 	
 	try {
 		const answer = await PeerConnection.createAnswer();
-		await PeerConnection.setLocalDescription(answer);
 
 		const streams = await navigator.mediaDevices.getUserMedia({
 			audio: false,
@@ -81,7 +103,12 @@ ipcRenderer.on('REQUEST_RECEIVED', AcceptRTCRequest);
 			await PeerConnection.addTrack(track, streams);
 		});
 		console.log('handle local streams', streams);
-		handleLocalStream(streams[0]);
+		handleLocalStream(streams);
+
+		const remoteStream = new MediaStream(PeerConnection.getReceivers().map(receiver => receiver.track));
+		handleRemoteStream(remoteStream);
+
+		await PeerConnection.setLocalDescription(answer);
 
 		/** @note send data using sockets */
 		ipcRenderer.send('ACCEPT_INVITE', { sdp: JSON.stringify(answer) });
@@ -146,21 +173,20 @@ function createPeerConnection() {
     PeerConnection.onnegotiationneeded = handleNegotiationNeededEvent;
 }
 
-function handleTrackEvent(event) {
-	console.log("Track event");
-	console.log('event tracks', event.track);
-	console.log('local stream', event.streams);
-	if (event.streams && event.streams[0]) {
-		console.log('local streams');
-		handleLocalStream(event.streams[0]);
-	} 
-	if(event.track) {
-		console.log('remote streams');
-		// const inboundStream = new MediaStream(PeerConnection.getReceivers().map(rec => rec.track));
-		const inboundStream = new MediaStream();
-		inboundStream.addTrack(event.track);
-		handleRemoteStream(inboundStream);
+async function handleTrackEvent(event) {
+	console.log('remote stream', event.streams);
+	// const [remoteStream] = event.streams;
+	if (event.streams) {
+		console.log('remote streams', event.streams);
+		handleRemoteStream(event.streams[0]);
 	}
+	// if(event.track) {
+	// 	console.log('remote streams', event.track);
+	// 	// const inboundStream = new MediaStream(PeerConnection.getReceivers().map(rec => rec.track));
+	// 	const inboundStream = new MediaStream();
+	// 	inboundStream.addTrack(event.track);
+	// 	handleRemoteStream(inboundStream);
+	// }
 }
 
 function handleICEGatheringStateChangeEvent(event) {
@@ -226,17 +252,17 @@ async function handleNewICECandidateMsg(event, request) {
 /** @note handle video streams */
 function handleLocalStream (stream) {
 	const localVideo = document.getElementById('localVideo'); 
+	localVideo.autoplay = true; 
 	localVideo.srcObject = stream;
 	localVideo.onloadedmetadata = (e) => localVideo.play();
-	// localVideo.play();
 }
 
 function handleRemoteStream(stream) {
 	const remoteVideo = document.getElementById('remoteVideo'); 
+	remoteVideo.setAttribute('autoplay', true) = true; 
 	// inboundStream = new MediaStream();
 	remoteVideo.srcObject = stream;
 	remoteVideo.onloadedmetadata = (e) => {console.log('remote_video_event', e); remoteVideo.play()};
-	// remoteVideo.play();
 }
 
 
