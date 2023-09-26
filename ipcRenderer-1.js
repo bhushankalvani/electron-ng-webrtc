@@ -36,7 +36,8 @@ async function RequestScreencast() {
 
 ipcRenderer.on('REQUEST_RECEIVED', AcceptRTCRequest);
 
-async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
+// async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
+	async function AcceptRTCRequest(event, message) {
 	console.log('method::REQUEST_RECEIVED, ipcRenderer');
 	if(!PeerConnection) {
 		createPeerConnection();
@@ -56,29 +57,37 @@ async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
 		await PeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(message.sdp)));
 	}
 
-	const streams = await navigator.mediaDevices.getUserMedia({
-		audio: false,
-		video: {
-		mandatory: {
-			chromeMediaSource: 'desktop',
-			chromeMediaSourceId: sourceId,
-			minWidth: ScreenSize.width,
-			maxWidth: ScreenSize.width,
-			minHeight: ScreenSize.height,
-			maxHeight: ScreenSize.height,
-		}
-		}
-	});
+	
+	try {
+		const answer = await PeerConnection.createAnswer();
+		await PeerConnection.setLocalDescription(answer);
 
-	streams.getTracks().forEach(async (track) => {
-		await PeerConnection.addTrack(track, streams);
-	});
-	handleLocalStream(streams[0]);
+		const streams = await navigator.mediaDevices.getUserMedia({
+			audio: false,
+			video: {
+			mandatory: {
+				chromeMediaSource: 'desktop',
+				chromeMediaSourceId: sourceId,
+				minWidth: ScreenSize.width,
+				maxWidth: ScreenSize.width,
+				minHeight: ScreenSize.height,
+				maxHeight: ScreenSize.height,
+			}
+			}
+		});
 
-	const answer = await PeerConnection.createAnswer();
-	await PeerConnection.setLocalDescription(answer);
-	/** @note send data using sockets */
-	ipcRenderer.send('ACCEPT_INVITE', { sdp: JSON.stringify(answer) });
+		// const streams = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+		streams.getTracks().forEach(async (track) => {
+			await PeerConnection.addTrack(track, streams);
+		});
+		console.log('handle local streams', streams);
+		handleLocalStream(streams[0]);
+
+		/** @note send data using sockets */
+		ipcRenderer.send('ACCEPT_INVITE', { sdp: JSON.stringify(answer) });
+	} catch(error) {
+		console.log('stream error', error);
+	}
 }
 
 
@@ -147,6 +156,7 @@ function handleTrackEvent(event) {
 	} 
 	if(event.track) {
 		console.log('remote streams');
+		// const inboundStream = new MediaStream(PeerConnection.getReceivers().map(rec => rec.track));
 		const inboundStream = new MediaStream();
 		inboundStream.addTrack(event.track);
 		handleRemoteStream(inboundStream);
@@ -201,11 +211,11 @@ function handleICECandidateEvent(event) {
 
 ipcRenderer.on('NEW_ICE_CANDIDATE', handleNewICECandidateMsg);
 async function handleNewICECandidateMsg(event, request) {
+	try {
 	console.log('candidate', request.candidate);
 	const candidate = new RTCIceCandidate(JSON.parse(request.candidate));
 
-	console.log("*** Adding received ICE candidate: " + JSON.stringify(candidate));
-	try {
+	console.log("*** Adding received ICE candidate: ", candidate);
 	await PeerConnection.addIceCandidate(candidate);
 	} catch(err) {
 	console.error('error adding ice candidate', err);
@@ -225,7 +235,7 @@ function handleRemoteStream(stream) {
 	const remoteVideo = document.getElementById('remoteVideo'); 
 	// inboundStream = new MediaStream();
 	remoteVideo.srcObject = stream;
-	remoteVideo.onloadedmetadata = (e) => remoteVideo.play();
+	remoteVideo.onloadedmetadata = (e) => {console.log('remote_video_event', e); remoteVideo.play()};
 	// remoteVideo.play();
 }
 

@@ -8,14 +8,28 @@ let ScreenSize;
 // Socket.io
 const { io } = require("socket.io-client");
 const socket = io(
-	'http://localhost:3000',
+	// 'http://localhost:3000',
+	'https://p2p-server.raoinfo.tech/',
 	{
 		// path: '/io'
 		transports: ['websocket', 'polling'],
 	}
 );
+  
+// Get the UUID v4 for each connection.
+// function uuidv4() {
+//     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
+//     .replace(/[xy]/g, function (c) {
+//         const r = Math.random() * 16 | 0, 
+//             v = c == 'x' ? r : (r & 0x3 | 0x8);
+//         return v.toString(16);
+//     });
+// }
 
+/** @fixme UUID v4 implementation pending for conditionals below */
+// const id = uuidv4(); 
 const id = 1; /** @note Static user id to request and respond to screencast requests */
+console.log('device UUID v4', id);
 
 
 function onReady() {
@@ -26,7 +40,7 @@ function onReady() {
 	console.log(path.join(__dirname, 'dist/index.html'));
 
 	AppWindow = new BrowserWindow({
-		titleBarStyle: id === 1 ? 'hidden' : 'default',
+		// titleBarStyle: id === 1 ? 'hidden' : 'default',
 		width: ScreenSize.width,
 		height: ScreenSize.height,
 		devTools: true,
@@ -83,12 +97,13 @@ function SocketConnect() {
 async function ScreencastRequest(peerReq) {
 	console.log('screencast request received', peerReq, id);
 	const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
-	for (const source of sources) {
-		if (source.name === 'Entire screen') {
-			AppWindow.webContents.send('REQUEST_RECEIVED', peerReq, source.id, ScreenSize);
-			return;
-		}
-	}
+	// for (const source of sources) {
+	// 	if (source.name === 'Entire screen') {
+	// 		AppWindow.webContents.send('REQUEST_RECEIVED', peerReq, source.id, ScreenSize);
+	// 		return;
+	// 	}
+	// }
+	AppWindow.webContents.send('REQUEST_RECEIVED', peerReq);
 }
 
 async function ScreencastReqAccepted(peerAnswer) {
