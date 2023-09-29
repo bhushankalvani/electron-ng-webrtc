@@ -2,23 +2,13 @@ const { ipcRenderer, desktopCapturer } = require('electron')
 
 console.log('ipcRenderer loaded');
 
+const ICE_CONFIG = require('./ice-server-config.json');
 
 /** @debug effects on resources */
 // contextBridge.exposeInMainWorld("ipcRenderer",ipcRenderer)
 
 // WebRTC default TURN server from many examples.
-const RTCConfig = {
-	iceServers: [{
-		// 'urls': ['stun:stun.l.google.com:19302'],
-		'urls': [
-			'stun:stun.l.google.com:19302',
-			'stun:stun1.l.google.com:19302',
-			'stun:stun2.l.google.com:19302',
-		],
-	}],
-	sdpSemantics: 'unified-plan', //newer implementation of WebRTC
-	iceCandidatePoolSize: 2
-};
+const RTCICEConfig = ICE_CONFIG;
 
 let PeerConnection;
 
@@ -166,7 +156,7 @@ async function ShareScreen(event, peerAnswer) {
  * @link https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection
  */
 function createPeerConnection() {
-	PeerConnection = new RTCPeerConnection(RTCConfig);
+	PeerConnection = new RTCPeerConnection(RTCICEConfig);
 
 	/** @fixme Pending event handlers */
 	PeerConnection.onicecandidate = onCreateNewICECandidateEvent;

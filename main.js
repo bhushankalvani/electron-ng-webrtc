@@ -28,7 +28,7 @@ const socket = io(
 
 /** @fixme UUID v4 implementation pending for conditionals below */
 // const id = uuidv4(); 
-const id = 2; /** @note Static user id to request and respond to screencast requests */
+const id = 1; /** @note Static user id to request and respond to screencast requests */
 console.log('device UUID v4', id);
 
 
