@@ -8,14 +8,13 @@ let ScreenSize;
 // Socket.io
 const { io } = require("socket.io-client");
 const socket = io(
-	// 'http://localhost:3000',
-	'https://p2p-server.raoinfo.tech',
+	'http://localhost:3000',
 	{
-		// path: '/io'
 		transports: ['websocket', 'polling'],
 	}
 );
 
+/** @fixme Enable UUIDv4 implementation. */
 // Get the UUID v4 for each connection.
 // function uuidv4() {
 //     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
@@ -27,17 +26,13 @@ const socket = io(
 // }
 
 /** @fixme UUID v4 implementation pending for conditionals below */
-// const id = uuidv4(); 
+// const id = uuidv4();
 const id = 2; /** @note Static user id to request and respond to screencast requests */
-console.log('device UUID v4', id);
-
 
 function onReady() {
-	console.log('electron app ready for id ', id);
-
+	console.log('device UUID v4', id);
 	const primaryDisplay = screen.getPrimaryDisplay();
 	ScreenSize = primaryDisplay.workAreaSize;
-	console.log(path.join(__dirname, 'dist/index.html'));
 
 	AppWindow = new BrowserWindow({
 		// titleBarStyle: id === 1 ? 'hidden' : 'default',
@@ -73,17 +68,22 @@ function setupSocketConnections() {
 	socket.on('disconnect', SocketDisconnect);
 	socket.on('screencast-accepted', ScreencastReqAccepted);
 	socket.on('ice-candidate-received', HandleIceCandidateReceiveEvent);
+	socket.on('negotiation-request', NegotiationRequestReceived);
 
 	socket.connect();
 }
 
+async function NegotiationRequestReceived(peerReq) {
+	AppWindow.webContents.send('NEGOTIATION_REQUEST_RECEIVED', peerReq);	
+}
+
 function SocketConnect() {
-	console.log('socket connected');
+	// console.log('socket connected');
 	socket.emit('register-user', { id }, async (res) => {
-		console.log('registration response: ', res, ` for id: ${id}`);
 		/** @note requesting a screencast for default user with userId 1. */
+		/** @fixme Use UUIDv4 implementation and make it a dynamic implementation. */
 		if (id === 2) {
-			console.log(`user id ${id} requesting screencast for 1`);
+			// console.log(`user id ${id} requesting screencast for 1`);
 			const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
 			for (const source of sources) {
 				if (source.name === 'Entire screen') {
@@ -101,7 +101,7 @@ function SocketConnect() {
  * @param {peerId} - Receives the peer Id requesting a call.
  */
 async function ScreencastRequest(peerReq) {
-	console.log('screencast request received', peerReq, id);
+	// console.log('screencast request received', peerReq, id);
 	const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
 	for (const source of sources) {
 		if (source.name === 'Entire screen') {
@@ -109,20 +109,11 @@ async function ScreencastRequest(peerReq) {
 			return;
 		}
 	}
-	// AppWindow.webContents.send('REQUEST_RECEIVED', peerReq);
 }
 
 async function ScreencastReqAccepted(peerAnswer) {
-	/** @fixme do something with peerAnswer to finish connection. */
-	/** @fixme @note handle creating new peerConnection for Admin and check if stream received or not. */
-	console.log('screencast request accepted');
+	// console.log('screencast request accepted');
 	const sources = await desktopCapturer.getSources({ types: ['screen'] });
-	// for (const source of sources) {
-	// 	if (source.name === 'Entire screen') {
-	// 		AppWindow.webContents.send('SHARE_SCREEN', source.id, ScreenSize, peerAnswer);
-	// 		return;
-	// 	}
-	// }
 	AppWindow.webContents.send('SHARE_SCREEN', peerAnswer);
 }
 
@@ -131,13 +122,13 @@ function HandleIceCandidateReceiveEvent(request) {
 }
 
 function SocketDisconnect() {
-	console.log('disconnect fired');
-	socket.emit('disconnect', 1);
+	// console.log('disconnect fired');
+	socket.emit('disconnect-call', 1);
 	socket.disconnect();
 }
 
 /** @note Event handlers for requests from ipcRenderer to main thread. */
-
+/** @fixme Use UUIDv4 implementation and make it a dynamic implementation. */
 ipcMain.on('NEW_SCREENCAST_REQ', (event, request) => {
 	if (id === 2) {
 		request['by'] = 2;
@@ -146,25 +137,33 @@ ipcMain.on('NEW_SCREENCAST_REQ', (event, request) => {
 	}
 });
 
+/** @fixme Use UUIDv4 implementation and make it a dynamic implementation. */
 ipcMain.on('NEGOTIATION', (event, request) => {
 	if (id === 2) {
 		request['by'] = 2;
 		request['for'] = 1;
-	} else {
+	} if(id === 1) {
 		request['by'] = 1;
 		request['for'] = 2;
 	}
-	socket.emit('request-screencast-cl', request);
+	socket.emit('negotiation', request);
 });
 
+/** @fixme Use UUIDv4 implementation and make it a dynamic implementation. */
 ipcMain.on('ACCEPT_INVITE', (event, acceptedInvite) => {
-	acceptedInvite['by'] = 1;
-	acceptedInvite['for'] = 2;
+	if(id === 1) {
+		acceptedInvite['by'] = 1;
+		acceptedInvite['for'] = 2;
+	} else {
+		acceptedInvite['by'] = 2;
+		acceptedInvite['for'] = 1;
+	}
 	socket.emit('accepted-invite', acceptedInvite);
 });
 
+/** @fixme Use UUIDv4 implementation and make it a dynamic implementation. */
 ipcMain.on('ICE_CANDIDATE', (event, request) => {
-	if (id === 1) { // @note: Just for test. Use real user ids for 'by' and 'for' fields when implementing.
+	if (id === 1) { /** @note @fixme Just for test. Use real user ids for 'by' and 'for' fields when implementing. */
 		request['by'] = 1;
 		request['for'] = 2;
 	} else {
@@ -175,15 +174,3 @@ ipcMain.on('ICE_CANDIDATE', (event, request) => {
 });
 
 app.on('ready', onReady);
-
-// async function captureConnectionAndDeviceScreen(socket) {
-// 	console.log('method::captureConnectionAndDeviceScreen');
-// 	const sources = await desktopCapturer.getSources({ types: ['window', 'screen'] });
-// 	for (const source of sources) {
-// 		console.log('source', source.name);
-// 		if (source.name === 'Electron' || source.name === 'webrtc-electron-ng') {
-// 			AppWindow.webContents.send('RECORD_SCREEN', source.id, socket);
-// 			return;
-// 		}
-// 	}
-// }
