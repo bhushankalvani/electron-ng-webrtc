@@ -8,14 +8,14 @@ let ScreenSize;
 // Socket.io
 const { io } = require("socket.io-client");
 const socket = io(
-	'http://localhost:3000',
-	// 'https://p2p-server.raoinfo.tech',
+	// 'http://localhost:3000',
+	'https://p2p-server.raoinfo.tech',
 	{
 		// path: '/io'
 		transports: ['websocket', 'polling'],
 	}
 );
-  
+
 // Get the UUID v4 for each connection.
 // function uuidv4() {
 //     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'
