@@ -79,7 +79,12 @@ async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
 
 
 	try {
+		
+		await PeerConnection.setLocalDescription(await PeerConnection.createAnswer());
 
+		/** @note send data using sockets */
+		ipcRenderer.send('ACCEPT_INVITE', { sdp: JSON.stringify(PeerConnection.localDescription) });
+		
 		const streams = await navigator.mediaDevices.getUserMedia({
 			audio: false,
 			video: {
@@ -95,17 +100,17 @@ async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
 		});
 
 		// const streams = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-		streams.getTracks().forEach(async (track) => {
-			await PeerConnection.addTrack(track, streams);
-		});
+		// streams.getTracks().forEach(async (track) => {
+		// 	await PeerConnection.addTrack(track, streams);
+		// });
+
+		streams.getTracks().forEach(
+			transceiver = async track => await PeerConnection.addTransceiver(track, {streams: [streams]})
+		);
+
+
 		console.log('handle local streams', streams);
 		handleLocalStream(streams);
-
-
-		await PeerConnection.setLocalDescription(await PeerConnection.createAnswer());
-
-		/** @note send data using sockets */
-		ipcRenderer.send('ACCEPT_INVITE', { sdp: JSON.stringify(PeerConnection.localDescription) });
 	} catch (error) {
 		console.log('stream error', error);
 	}
@@ -118,10 +123,10 @@ ipcRenderer.on('SHARE_SCREEN', ShareScreen);
 async function ShareScreen(event, peerAnswer) {
 	console.log('method::SHARE_SCREEN, ipcRenderer');
 	try {
-		if (PeerConnection.signalingState != 'stable') {
+		// if (PeerConnection.signalingState != 'stable') {
 			const answer = new RTCSessionDescription(JSON.parse(peerAnswer.sdp));
 			await PeerConnection.setRemoteDescription(answer);
-		}
+		// }
 		// const streams = await navigator.mediaDevices.getUserMedia({
 		// 	audio: false,
 		// 	video: {
@@ -165,6 +170,7 @@ function createPeerConnection() {
 	PeerConnection.onsignalingstatechange = handleSignalingStateChangeEvent;
 	PeerConnection.ontrack = handleTrackEvent;
 	PeerConnection.onnegotiationneeded = handleNegotiationNeededEvent;
+	PeerConnection.onconnectionstatechange = handleConnectionStateChangeEvent;
 
 	PeerConnection.addEventListener('track', async (event) => {
 		console.log('remote tracks found', event);
@@ -172,6 +178,20 @@ function createPeerConnection() {
 		handleRemoteStream(remoteStream);
 		// remoteVideo.srcObject = remoteStream;
 	});
+
+	PeerConnection.addEventListener('connectionstatechange', event => {
+    if (PeerConnection.connectionState === 'connected') {
+        // Peers connected!
+		console.info('Peers connected');
+    }
+});
+}
+
+async function handleConnectionStateChangeEvent(event) {
+	if (PeerConnection.connectionState === 'connected') {
+		console.info('Peers connected');
+		// Peers connected!
+    }
 }
 
 async function handleTrackEvent(event) {
@@ -202,7 +222,7 @@ function handleICEConnectionStateChangeEvent(event) {
 		case "failed":
 		case "disconnected":
 			console.log('*** ICE candidate call failed');
-			// closeVideoCall();
+			CloseScreencast();
 			break;
 	}
 }
@@ -218,7 +238,7 @@ function handleSignalingStateChangeEvent(event) {
 	switch (PeerConnection.signalingState) {
 		case "closed":
 			/** @fixme Add ipcEvent to tell socket to end connections and clean up. */
-			// closeVideoCall();
+			CloseScreencast();
 			console.log('*** ICE candidate call closed');
 			break;
 	}
@@ -230,7 +250,7 @@ function handleSignalingStateChangeEvent(event) {
 function onCreateNewICECandidateEvent(event) {
 	if (PeerConnection.localDescription && PeerConnection.remoteDescription && event.candidate) {
 		console.log("*** Outgoing ICE candidate: " + event.candidate.candidate);
-		ipcRenderer.send('ICE_CANDIDATE', { candidate: event.candidate.toJSON() });
+		ipcRenderer.send('ICE_CANDIDATE', { candidate: JSON.stringify(event.candidate) });
 	}
 }
 
@@ -240,7 +260,8 @@ async function handleNewICECandidateMsg(event, request) {
 		console.log('candidate', request.candidate);
 		if (!PeerConnection.remoteDescription || !PeerConnection.localDescription) return;
 
-		const candidate = new RTCIceCandidate(request.candidate);
+		// const candidate = new RTCIceCandidate(JSON.parse(request.candidate));
+		const candidate = JSON.parse(request.candidate);
 
 		console.log("*** Remote description for current PeerConnection: ", PeerConnection.remoteDescription);
 		console.log("*** Adding received ICE candidate: ", candidate);
@@ -297,4 +318,42 @@ async function handleNegotiationNeededEvent() {
 	} catch (err) {
 		console.error("The following error occurred while handling the negotiationneeded event:", err);
 	};
+}
+
+async function CloseScreencast() {
+	if (PeerConnection) {
+		console.log("Closing connection and call");
+	
+		// Disconnect all our event listeners; we don't want stray events
+		// to interfere with the hangup while it's ongoing.
+	
+		PeerConnection.ontrack = null;
+		PeerConnection.onnicecandidate = null;
+		PeerConnection.oniceconnectionstatechange = null;
+		PeerConnection.onsignalingstatechange = null;
+		PeerConnection.onicegatheringstatechange = null;
+		PeerConnection.onnotificationneeded = null;
+	
+		// Stop all transceivers on the connection
+	
+		PeerConnection.getTransceivers().forEach(transceiver => {
+		  transceiver.stop();
+		});
+	
+		// Stop the webcam preview as well by pausing the <video>
+		// element, then stopping each of the getUserMedia() tracks
+		// on it.
+	
+		if (localVideo.srcObject) {
+		  localVideo.pause();
+		  localVideo.srcObject.getTracks().forEach(track => {
+			track.stop();
+		  });
+		}
+	
+		// Close the peer connection
+	
+		PeerConnection.close();
+		PeerConnection = null;
+	}
 }
