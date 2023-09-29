@@ -9,10 +9,15 @@ console.log('ipcRenderer loaded');
 // WebRTC default TURN server from many examples.
 const RTCConfig = {
 	iceServers: [{
-		'urls': 'stun:stun.l.google.com:19302',
-		// username: 'webrtc',
-		// credential: 'turnserver'
-	}]
+		// 'urls': ['stun:stun.l.google.com:19302'],
+		'urls': [
+			'stun:stun.l.google.com:19302',
+			'stun:stun1.l.google.com:19302',
+			'stun:stun2.l.google.com:19302',
+		],
+	}],
+	sdpSemantics: 'unified-plan', //newer implementation of WebRTC
+	iceCandidatePoolSize: 2
 };
 
 let PeerConnection;
@@ -22,7 +27,9 @@ ipcRenderer.on('REQUEST_SCREENCAST', RequestScreencast);
 
 async function RequestScreencast(event, sourceId, ScreenSize) {
 	console.log('method::REQUEST_SCREENCAST, ipcRenderer');
-	createPeerConnection();
+	if(!PeerConnection) {
+		createPeerConnection();
+	}
 
 	const offer = await PeerConnection.createOffer();
 	if (PeerConnection.signalingState != "stable") {
@@ -76,7 +83,7 @@ async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
 			PeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(message.sdp)))
 		]);
 		return;
-	  } else {
+	} else {
 		await PeerConnection.setRemoteDescription(new RTCSessionDescription(JSON.parse(message.sdp)));
 	}
 
@@ -104,9 +111,6 @@ async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
 		});
 		console.log('handle local streams', streams);
 		handleLocalStream(streams);
-
-		const remoteStream = new MediaStream(PeerConnection.getReceivers().map(receiver => receiver.track));
-		handleRemoteStream(remoteStream);
 
 		await PeerConnection.setLocalDescription(answer);
 
@@ -165,27 +169,30 @@ function createPeerConnection() {
 	PeerConnection = new RTCPeerConnection(RTCConfig);
 
     /** @fixme Pending event handlers */
-    PeerConnection.onicecandidate = handleICECandidateEvent;
+    PeerConnection.onicecandidate = onCreateNewICECandidateEvent;
     PeerConnection.oniceconnectionstatechange = handleICEConnectionStateChangeEvent;
     PeerConnection.onicegatheringstatechange = handleICEGatheringStateChangeEvent;
     PeerConnection.onsignalingstatechange = handleSignalingStateChangeEvent;
     PeerConnection.ontrack = handleTrackEvent;
     PeerConnection.onnegotiationneeded = handleNegotiationNeededEvent;
+
+	PeerConnection.addEventListener('track', async (event) => {
+		console.log('remote tracks found', event);
+		const [remoteStream] = event.streams;
+		handleRemoteStream(remoteStream);
+		// remoteVideo.srcObject = remoteStream;
+	});
 }
 
 async function handleTrackEvent(event) {
 	console.log('remote stream', event.streams);
 	// const [remoteStream] = event.streams;
-	if (event.streams) {
+	// if (event.streams.length > 0) {
 		console.log('remote streams', event.streams);
-		handleRemoteStream(event.streams[0]);
-	}
-	// if(event.track) {
-	// 	console.log('remote streams', event.track);
-	// 	// const inboundStream = new MediaStream(PeerConnection.getReceivers().map(rec => rec.track));
-	// 	const inboundStream = new MediaStream();
-	// 	inboundStream.addTrack(event.track);
-	// 	handleRemoteStream(inboundStream);
+		// handleRemoteStream(event.streams[0]);
+		// const remoteStream = new MediaStream(PeerConnection.getReceivers().map(receiver => receiver.track));
+		const remoteStream = event.streams[0];
+		handleRemoteStream(remoteStream);
 	// }
 }
 
@@ -204,6 +211,7 @@ function handleICEConnectionStateChangeEvent(event) {
 	  case "closed":
 	  case "failed":
 	  case "disconnected":
+		console.log('*** ICE candidate call failed');
 		// closeVideoCall();
 		break;
 	}
@@ -218,9 +226,14 @@ function handleICEConnectionStateChangeEvent(event) {
 function handleSignalingStateChangeEvent(event) {
 	console.log("*** WebRTC signaling state changed to: " + PeerConnection.signalingState);
 	switch(PeerConnection.signalingState) {
+		case 'have-remote-offer':
+			
+		
+		break;
 		case "closed":
 			/** @fixme Add ipcEvent to tell socket to end connections and clean up. */
 			// closeVideoCall();
+		console.log('*** ICE candidate call closed');
 		break;
 	}
 }
@@ -228,23 +241,27 @@ function handleSignalingStateChangeEvent(event) {
 // Handles |icecandidate| events by forwarding the specified
 // ICE candidate (created by our local ICE agent) to the other
 // peer through the signaling server.
-function handleICECandidateEvent(event) {
-	if (event.candidate) {
+function onCreateNewICECandidateEvent(event) {
+	if (PeerConnection.localDescription && PeerConnection.remoteDescription && event.candidate) {
 		console.log("*** Outgoing ICE candidate: " + event.candidate.candidate);
-		ipcRenderer.send('ICE_CANDIDATE', {candidate: JSON.stringify(event.candidate)});
+		ipcRenderer.send('ICE_CANDIDATE', {candidate: event.candidate.toJSON()});
 	}
 }
 
 ipcRenderer.on('NEW_ICE_CANDIDATE', handleNewICECandidateMsg);
 async function handleNewICECandidateMsg(event, request) {
 	try {
-	console.log('candidate', request.candidate);
-	const candidate = new RTCIceCandidate(JSON.parse(request.candidate));
+		console.log('candidate', request.candidate);
+		if(!PeerConnection.remoteDescription || !PeerConnection.localDescription) return;
 
-	console.log("*** Adding received ICE candidate: ", candidate);
-	await PeerConnection.addIceCandidate(candidate);
+		// const candidate = new RTCIceCandidate(JSON.parse(request.candidate));
+		const candidate = new RTCIceCandidate(request.candidate);
+
+		console.log("*** Remote description for current PeerConnection: ", PeerConnection.remoteDescription);
+		console.log("*** Adding received ICE candidate: ", candidate);
+		await PeerConnection.addIceCandidate(candidate);
 	} catch(err) {
-	console.error('error adding ice candidate', err);
+		console.error('error adding ice candidate', err);
 	}
 }
 
@@ -259,7 +276,7 @@ function handleLocalStream (stream) {
 
 function handleRemoteStream(stream) {
 	const remoteVideo = document.getElementById('remoteVideo'); 
-	remoteVideo.setAttribute('autoplay', true) = true; 
+	remoteVideo.setAttribute('autoplay', true);
 	// inboundStream = new MediaStream();
 	remoteVideo.srcObject = stream;
 	remoteVideo.onloadedmetadata = (e) => {console.log('remote_video_event', e); remoteVideo.play()};
