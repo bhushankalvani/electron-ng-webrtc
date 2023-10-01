@@ -2,6 +2,9 @@ const { ipcRenderer, desktopCapturer } = require('electron')
 
 console.log('ipcRenderer loaded');
 
+/** @note store the ids of self and requesting peer to process requests. */
+let ownId, requestedBy;
+
 /** 
  * @note Use your own TURN server config.
  * Link for the provider I used for creating a quick and utilising an existing TURN server capability. 
@@ -36,14 +39,15 @@ async function RequestScreencast(event, sourceId, ScreenSize) {
 	ipcRenderer.send('NEW_SCREENCAST_REQ', { sdp: JSON.stringify(PeerConnection.localDescription) });
 }
 
-
 /** 
  * @note Negotiation event between peers to decide the best protocol for the call.
  * and sends all queued ICE Candidates. New connections can also be established
  * in case of old ICE candidate failures.
  */
 ipcRenderer.on('NEGOTIATION_REQUEST_RECEIVED', NegotiationEvent);
-async function NegotiationEvent() {
+async function NegotiationEvent(event, message) {
+	ownId = message['for'];
+	requestedBy = message['by'];
 	// console.log('method::NEGOTIATION_REQUEST_RECEIVED, ipcRenderer');
 	if (!PeerConnection) {
 		createPeerConnection();
@@ -67,7 +71,7 @@ async function NegotiationEvent() {
 	await PeerConnection.setLocalDescription(await PeerConnection.createAnswer());
 
 	/** @note send data using sockets */
-	ipcRenderer.send('ACCEPT_INVITE', { sdp: JSON.stringify(PeerConnection.localDescription) });
+	ipcRenderer.send('ACCEPT_INVITE', { for: requestedBy, by: ownId, sdp: JSON.stringify(PeerConnection.localDescription) });
 	
 	/** @note After setting the local description, check if there are ICE candidates in the queue. */
 	sendQueuedICECandidates();
@@ -79,6 +83,8 @@ async function NegotiationEvent() {
  */
 ipcRenderer.on('REQUEST_RECEIVED', AcceptRTCRequest);
 async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
+	ownId = message['for'];
+	requestedBy = message['by'];
 	// console.log('method::REQUEST_RECEIVED, ipcRenderer');
 	if (!PeerConnection) {
 		createPeerConnection();
@@ -124,7 +130,7 @@ async function AcceptRTCRequest(event, message, sourceId, ScreenSize) {
 		await PeerConnection.setLocalDescription(await PeerConnection.createAnswer());
 
 		/** @note send data using sockets */
-		ipcRenderer.send('ACCEPT_INVITE', { sdp: JSON.stringify(PeerConnection.localDescription) });
+		ipcRenderer.send('ACCEPT_INVITE', { for: requestedBy, by: ownId, sdp: JSON.stringify(PeerConnection.localDescription) });
 		
 		/** @note After setting the local description, check if there are ICE candidates in the queue. */
 		sendQueuedICECandidates();
@@ -198,7 +204,8 @@ function handleICEGatheringStateChangeEvent(event) {
 	console.log("*o* ICE gathering state changed to: " + PeerConnection.iceGatheringState);
 }
 
-/** Handle |iceconnectionstatechange| events. This will detect
+/** 
+ * @note Handle |iceconnectionstatechange| events. This will detect
  * when the ICE connection is closed, failed, or disconnected.
  *
  * This is called when the state of the ICE agent changes.
@@ -270,7 +277,7 @@ function sendQueuedICECandidates() {
  * @note Sends individual candidates over socket to the connected Peer.
 */
 function sendIceCandidateToPeer(candidate) {
-	ipcRenderer.send('ICE_CANDIDATE', { candidate: JSON.stringify(candidate) });
+	ipcRenderer.send('ICE_CANDIDATE', { by: ownId, for: requestedBy, candidate: JSON.stringify(candidate) });
 }
 
 /**
@@ -279,6 +286,8 @@ function sendIceCandidateToPeer(candidate) {
 ipcRenderer.on('NEW_ICE_CANDIDATE', handleReceivedICECandidateMsg);
 async function handleReceivedICECandidateMsg(event, request) {
 	try {
+		ownId = request['for'];
+		requestedBy = request['by'];
 		if (!PeerConnection.remoteDescription || !PeerConnection.localDescription) return;
 		const candidate = new RTCIceCandidate(JSON.parse(request.candidate));
 
@@ -333,7 +342,7 @@ async function handleNegotiationNeededEvent() {
 
 		/** @note Send the offer to the remote peer. */
 		// console.log("Sending the offer to the remote peer");
-		ipcRenderer.send('NEGOTIATION', { sdp: JSON.stringify(PeerConnection.localDescription) });
+		ipcRenderer.send('NEGOTIATION', { by:ownId, for: requestedBy, sdp: JSON.stringify(PeerConnection.localDescription) });
 
 	} catch (err) {
 		console.error("The following error occurred while handling the negotiationneeded event:", err);
@@ -344,10 +353,15 @@ async function handleNegotiationNeededEvent() {
  * @note Safely unload peer connection and stop it's streams.
  * Use it to hangup calls normally or in errored states.
  */
-async function CloseScreencast() {
+ipcRenderer.on('DISCONNECT_CALL', event => CloseScreencast(true));
+async function CloseScreencast(peerRequest = false) {
 	if (PeerConnection) {
 		// console.log("Closing connection and call");
-	
+		if(!peerRequest) {
+			this.socket.emit('disconnect-call', {for: requestedBy, by: ownId});
+		}
+		requestedBy = null;
+		ownId = null;
 		/** 
 		 * @note Disconnect all our event listeners; we don't want stray events
 		 * to interfere with the hangup while it's ongoing.

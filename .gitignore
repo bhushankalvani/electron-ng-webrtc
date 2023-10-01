@@ -45,3 +45,4 @@ Thumbs.db
 # environment
 .env
 ice-server-config.json
+ice-server-config*.json
