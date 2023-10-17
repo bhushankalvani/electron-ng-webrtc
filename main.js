@@ -27,7 +27,7 @@ const socket = io(
 
 /** @fixme UUID v4 implementation pending for conditionals below */
 // const id = uuidv4();
-const id = 2; /** @note Static user id to request and respond to screencast requests */
+const id = "1"; /** @note Static user id to request and respond to screencast requests */
 
 function onReady() {
 	console.log('device UUID v4', id);
@@ -64,11 +64,12 @@ function onReady() {
 
 function setupSocketConnections() {
 	socket.on('connect', SocketConnect);
-	socket.on('request-screencast', ScreencastRequest);
+	socket.on('requesting-screencast', ScreencastRequest);
 	socket.on('disconnect', SocketDisconnect);
 	socket.on('screencast-accepted', ScreencastReqAccepted);
 	socket.on('ice-candidate-received', HandleIceCandidateReceiveEvent);
 	socket.on('negotiation-request', NegotiationRequestReceived);
+	socket.on('disconnect-call', DisconnectCall);
 
 	socket.connect();
 }
@@ -121,6 +122,10 @@ function HandleIceCandidateReceiveEvent(request) {
 	AppWindow.webContents.send('NEW_ICE_CANDIDATE', request);
 }
 
+async function DisconnectCall(request) {
+	AppWindow.webContents.send('DISCONNECT_CALL', request);	
+}
+
 function SocketDisconnect() {
 	// console.log('disconnect fired');
 	socket.emit('disconnect-call', 1);
@@ -133,44 +138,24 @@ ipcMain.on('NEW_SCREENCAST_REQ', (event, request) => {
 	if (id === 2) {
 		request['by'] = 2;
 		request['for'] = 1;
-		socket.emit('request-screencast-cl', request);
+		socket.emit('request-screencast', request);
 	}
 });
 
 /** @fixme Use UUIDv4 implementation and make it a dynamic implementation. */
 ipcMain.on('NEGOTIATION', (event, request) => {
-	if (id === 2) {
-		request['by'] = 2;
-		request['for'] = 1;
-	} if(id === 1) {
-		request['by'] = 1;
-		request['for'] = 2;
-	}
 	socket.emit('negotiation', request);
 });
 
 /** @fixme Use UUIDv4 implementation and make it a dynamic implementation. */
 ipcMain.on('ACCEPT_INVITE', (event, acceptedInvite) => {
-	if(id === 1) {
-		acceptedInvite['by'] = 1;
-		acceptedInvite['for'] = 2;
-	} else {
-		acceptedInvite['by'] = 2;
-		acceptedInvite['for'] = 1;
-	}
 	socket.emit('accepted-invite', acceptedInvite);
 });
 
 /** @fixme Use UUIDv4 implementation and make it a dynamic implementation. */
 ipcMain.on('ICE_CANDIDATE', (event, request) => {
-	if (id === 1) { /** @note @fixme Just for test. Use real user ids for 'by' and 'for' fields when implementing. */
-		request['by'] = 1;
-		request['for'] = 2;
-	} else {
-		request['by'] = 2;
-		request['for'] = 1;
-	}
 	socket.emit('new-ice-candidate', request);
 });
+
 
 app.on('ready', onReady);
